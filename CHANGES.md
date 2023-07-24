@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7 (unreleased)
+
+- Officially require python >= 3.7. (Previously, we were not testing
+  with python < 3.7.)
+
+### Tests
+
+- Test under python 3.11.
+
 ## 0.6 (2022-01-09)
 
 Updated README for Webpack version 5 and move to a PEP517-compatible build for the Python package.
