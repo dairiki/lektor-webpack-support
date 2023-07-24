@@ -1,4 +1,7 @@
 import os
+import shutil
+import subprocess
+from pathlib import Path
 
 from lektor.pluginsystem import Plugin
 from lektor.reporter import reporter
@@ -12,11 +15,27 @@ class WebpackSupportPlugin(Plugin):
 
     def __init__(self, *args, **kwargs):
         Plugin.__init__(self, *args, **kwargs)
+        self.webpack_root = Path(self.env.root_path, "webpack")
         self.webpack_process = None
 
     def is_enabled(self, extra_flags):
         return bool(extra_flags.get("webpack"))
 
+    def get_pkg_manager_bin(self):
+        yarn_lock = self.webpack_root / "yarn.lock"
+        if yarn_lock.exists():
+            yarn_bin = shutil.which("yarn")
+            if yarn_bin is not None:
+                return yarn_bin
+        npm_bin = shutil.which("npm")
+        if npm_bin is None:
+            raise RuntimeError("can not locate 'npm' executable")
+        return npm_bin
+
+    @property
+    def webpack_bin(self):
+        webpack_bin = self.webpack_root.absolute() / "node_modules/.bin/webpack"
+        
     def run_webpack(self, watch=False):
         webpack_root = os.path.join(self.env.root_path, "webpack")
         args = [os.path.join(webpack_root, "node_modules", ".bin", "webpack")]
@@ -25,16 +44,9 @@ class WebpackSupportPlugin(Plugin):
         return portable_popen(args, cwd=webpack_root)
 
     def install_node_dependencies(self):
-        webpack_root = os.path.join(self.env.root_path, "webpack")
-
-        # Use yarn over npm if it's availabe and there is a yarn lockfile
-        has_yarn_lockfile = os.path.exists(os.path.join(webpack_root, "yarn.lock"))
-        pkg_manager = "npm"
-        if locate_executable("yarn") is not None and has_yarn_lockfile:
-            pkg_manager = "yarn"
-
+        pkg_manager = self.get_pkg_manager_bin()
         reporter.report_generic("Running {} install".format(pkg_manager))
-        portable_popen([pkg_manager, "install"], cwd=webpack_root).wait()
+        subprocess.run([pkg_manager, "install"], cwd=webpack_root, check=True)
 
     def on_server_spawn(self, **extra):
         extra_flags = extra.get("extra_flags") or extra.get("build_flags") or {}
@@ -42,7 +54,9 @@ class WebpackSupportPlugin(Plugin):
             return
         self.install_node_dependencies()
         reporter.report_generic("Spawning webpack watcher")
-        self.webpack_process = self.run_webpack(watch=True)
+        self.webpack_process = subprocess.Popen(
+            [self.webpack_bin, "--watch"], cwd=self.webpack_root
+        )
 
     def on_server_stop(self, **extra):
         if self.webpack_process is not None:
@@ -57,5 +71,5 @@ class WebpackSupportPlugin(Plugin):
             return
         self.install_node_dependencies()
         reporter.report_generic("Starting webpack build")
-        self.run_webpack().wait()
+        subprocess.run([self.webpack_bin], cwd=self.webpack_root, check=True)
         reporter.report_generic("Webpack build finished")
